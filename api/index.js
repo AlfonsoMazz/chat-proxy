@@ -20,7 +20,7 @@ app.use(cors(corsOptions));
 
 // --- Nuestro Endpoint para Voiceflow ---
 // Toda la lógica se ejecutará cuando el frontend llame a /api/interact
-app.post('/api/interact', async (req, res) => {
+app.post('/', async (req, res) => {
   try {
     // 1. Recibimos los datos que nos envía el frontend (el userID y la acción)
     const { userID, action } = req.body;
