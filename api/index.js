@@ -10,10 +10,13 @@ require('dotenv').config();
 const app = express();
 
 // --- Configuraciones del Servidor (Middlewares) ---
-// Permite que tu frontend se comunique con este servidor
-app.use(cors()); 
-// Permite al servidor entender el formato JSON que enviará el frontend
-app.use(express.json()); 
+// Define explícitamente quién tiene permiso para conectarse
+const corsOptions = {
+       origin: 'https://demo.tribunalelectoral.datialabs.com'
+};
+
+// Usa la nueva configuración
+app.use(cors(corsOptions));
 
 // --- Nuestro Endpoint para Voiceflow ---
 // Toda la lógica se ejecutará cuando el frontend llame a /api/interact
