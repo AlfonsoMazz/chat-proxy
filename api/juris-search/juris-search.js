@@ -1,15 +1,28 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const Fuse = require('fuse.js');
+const puppeteer = require('puppeteer-core');
+const chrome = require('chrome-aws-lambda');
 
 const PAGE_URL = 'https://www.te.gob.mx/iuse_old2025/front/compilacion';
 
 function fetchAndParsePage() {
-  return axios.get(PAGE_URL)
-    .then(response => {
-      const $ = cheerio.load(response.data);
+  return new Promise(async (resolve, reject) => {
+    let browser;
+    try {
+      browser = await puppeteer.launch({
+        args: chrome.args,
+        executablePath: await chrome.executablePath,
+        headless: chrome.headless,
+      });
+      const page = await browser.newPage();
+      await page.goto(PAGE_URL, { waitUntil: 'networkidle0' });  // Espera JS load
+      const html = await page.content();  // HTML rendered
+      await browser.close();
+
+      const $ = cheerio.load(html);
       
-      // NUEVO: Parsea tabla de índices vigentes (prioridad, como en tu prompt)
+      // Parsea tabla de índices vigentes (verbatim de <tr><td>)
       const blocks = [];
       $('table tr').each((i, row) => {
         const cols = $(row).find('td');
@@ -17,60 +30,54 @@ function fetchAndParsePage() {
           const num = $(cols[0]).text().trim();
           const rubro = $(cols[1]).text().trim();
           const clave = $(cols[2]).text().trim();
-          if (rubro && clave && rubro.length > 20) {  // Filtra triviales
-            const full_text = `ÍNDICE: ${rubro} (Clave: ${clave})`;  // Verbatim como resumen; full si link a detalle
+          if (rubro && clave && rubro.length > 20 && !blocks.some(b => b.clave === clave)) {  // Unicidad por clave
+            const full_text = rubro;  // Verbatim rubro como resumen; full si hay detalle
             blocks.push({
               clave,
               rubro,
-              fecha: null,  // No visible en tabla; extrae si hay
+              fecha: null,  // Extrae si hay columna fecha
               full_text
             });
           }
         }
       });
       
-      // Extrae texto plano para bloques full-text (viejo + mejorado)
+      // Parsea bloques full-text abajo (si existen, verbatim)
       let text = $('body').text().replace(/\s+/g, ' ').trim();
-      
-      // Limpia ruido: remueve líneas cortas (simulando split \n, pero en texto plano)
       const lines = text.split('\n').filter(line => line.length > 10);
       text = lines.join('\n');
-      
-      // Split bloques: regex para delimitadores en FULL CAPS (e.g., RUBRO, CONSIDERANDO)
-      const blockPattern = /([A-Z\s]{3,50})\s+((?:.|\n)*?)(?=[A-Z\s]{3,50}|$)/g;  // Remueve \n+ estricto, usa \s+ para espacios
+      const blockPattern = /([A-Z\s]{3,50})\s+((?:.|\n)*?)(?=[A-Z\s]{3,50}|$)/g;
       let match;
       while ((match = blockPattern.exec(text)) !== null) {
         const title = match[1].trim();
         let content = match[2].trim();
-        if (content.length > 200 && !blocks.some(b => b.rubro.includes(title))) {  // Evita duplicados
-          // Extrae clave: patrón XX/XXXX
+        if (content.length > 200 && !blocks.some(b => b.rubro.includes(title))) {
           const claveMatch = content.match(/(\d{2}\/\d{4})/);
           const clave = claveMatch ? claveMatch[1] : null;
-          
-          // Extrae fecha: DD de MES de YYYY
           const fechaMatch = content.match(/(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})/);
           const fecha = fechaMatch ? fechaMatch[1] : null;
-          
-          // Rubro: primera línea en caps post-título
           const rubroMatch = content.match(/^([A-Z].*?)(?=\n[A-Z]|$)/mi);
           const rubro = rubroMatch ? rubroMatch[1].trim() : title;
           
-          blocks.push({
-            clave,
-            rubro,
-            fecha,
-            full_text: content.length > 2000 ? content.substring(0, 2000) + '...' : content
-          });
+          if (clave && !blocks.some(b => b.clave === clave)) {  // Unicidad
+            blocks.push({
+              clave,
+              rubro,
+              fecha,
+              full_text: content.length > 2000 ? content.substring(0, 2000) + '...' : content
+            });
+          }
         }
       }
       
-      console.log(`Parsed ${blocks.length} blocks from table/full-text`);  // Debug en logs Vercel
-      return blocks;
-    })
-    .catch(error => {
+      console.log(`Parsed ${blocks.length} blocks from table/full-text`);  // Debug
+      resolve(blocks);
+    } catch (error) {
+      if (browser) await browser.close();
       console.error('Error fetching page:', error);
-      throw error;
-    });
+      reject(error);
+    }
+  });
 }
 
 function generateVariations(userQuery) {
@@ -91,7 +98,7 @@ function generateVariations(userQuery) {
 function searchBlocks(blocks, variations, full) {
   const fuse = new Fuse(blocks, {
     keys: ['rubro', 'full_text'],
-    threshold: 0.4,  // >50% similitud (0=exacto, 1=loose)
+    threshold: 0.4,  // Loose para sinónimos
     includeScore: true
   });
 
@@ -102,13 +109,13 @@ function searchBlocks(blocks, variations, full) {
     const results = fuse.search(varQuery);
     for (const result of results) {
       const block = result.item;
-      if (!seenClaves.has(block.clave)) {
+      if (block.clave && !seenClaves.has(block.clave)) {
         seenClaves.add(block.clave);
         const match = {
           clave: block.clave,
           rubro: block.rubro,
           fecha: block.fecha,
-          resumen: block.rubro,  // Verbatim
+          resumen: block.rubro,  // Verbatim exacto
           completo: full ? block.full_text : ''
         };
         matches.push(match);
