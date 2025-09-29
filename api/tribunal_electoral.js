@@ -1,7 +1,6 @@
 const fetch = require('node-fetch');
 
 module.exports = async (req, res) => {
-    // 1. Permisos CORS (sin cambios)
     res.setHeader('Access-Control-Allow-Origin', 'https://demo.tribunalelectoral.datialabs.com');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -21,10 +20,8 @@ module.exports = async (req, res) => {
             return res.status(400).json({ error: 'Falta el "target" en la petición.' });
         }
 
-        // --- ROUTER: Decide a qué API llamar ---
-
         if (target === 'voiceflow') {
-            const { userID, action, stream } = payload; // Capturamos el parámetro "stream" del frontend
+            const { userID, action } = payload;
             if (!userID || !action) {
                 return res.status(400).json({ error: 'Faltan userID o action para Voiceflow.' });
             }
@@ -32,8 +29,8 @@ module.exports = async (req, res) => {
             const API_KEY = process.env.TRIBUNAL_ELECTORAL_VOICEFLOW_API_KEY;
             const VERSION_ID = process.env.TRIBUNAL_ELECTORAL_VOICEFLOW_VERSION_ID;
 
-            // Construimos la URL de Voiceflow, añadiendo el parámetro para streaming
-            const url = `https://general-runtime.voiceflow.com/state/user/${userID}/interact${stream ? '?stream=true' : ''}`;
+            // ### CORRECCIÓN 1: Volvemos a la URL original sin "/streaming" ###
+            const url = `https://general-runtime.voiceflow.com/state/user/${userID}/interact`;
 
             const voiceflowResponse = await fetch(url, {
                 method: 'POST',
@@ -41,25 +38,23 @@ module.exports = async (req, res) => {
                     'Content-Type': 'application/json',
                     'Authorization': API_KEY,
                     'versionID': VERSION_ID,
+                    // ### CORRECCIÓN 2: Añadimos el header para pedir el STREAM ###
+                    'Accept': 'text/event-stream'
                 },
                 body: JSON.stringify({ action }),
             });
 
-            if (!voiceflowResponse.ok) throw new Error('Error en la respuesta de Voiceflow');
+            if (!voiceflowResponse.ok) {
+                throw new Error(`Error en la respuesta de Voiceflow: ${voiceflowResponse.statusText}`);
+            }
             
-            // ########## INICIO DE LA CORRECCIÓN ##########
-            // En lugar de esperar el JSON, ahora pasamos el stream directamente.
-            
-            res.setHeader('Content-Type', 'application/json'); // Indicamos que el stream contiene JSON
-            voiceflowResponse.body.pipe(res); // ¡Convertido en tubería!
-            
-            // ########## FIN DE LA CORRECCIÓN ##########
+            res.setHeader('Content-Type', 'application/json');
+            voiceflowResponse.body.pipe(res);
 
         } else if (target === 'tts') {
+            // Tu código de TTS (sin cambios)
             const { text } = payload;
-            if (!text) {
-                return res.status(400).json({ error: 'Falta el "text" para TTS.' });
-            }
+            if (!text) return res.status(400).json({ error: 'Falta el "text" para TTS.' });
 
             const API_KEY = process.env.TRIBUNAL_ELECTORAL_TTS_API_KEY;
             const VOICE_ID = process.env.TRIBUNAL_ELECTORAL_VOICE_ID;
@@ -75,17 +70,14 @@ module.exports = async (req, res) => {
                 body: JSON.stringify({
                     text: text,
                     model_id: 'eleven_multilingual_v2',
-                    voice_settings: {
-                        stability: 0.5,
-                        similarity_boost: 0.75,
-                    },
+                    voice_settings: { stability: 0.5, similarity_boost: 0.75 },
                 }),
             });
 
             if (!ttsResponse.ok) throw new Error('Error en la respuesta de ElevenLabs');
             
             res.setHeader('Content-Type', 'audio/mpeg');
-            ttsResponse.body.pipe(res); // Tu tubería de audio (ya estaba correcta)
+            ttsResponse.body.pipe(res);
 
         } else {
             return res.status(400).json({ error: 'Target no válido.' });
