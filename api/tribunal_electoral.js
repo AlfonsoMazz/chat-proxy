@@ -29,6 +29,7 @@ module.exports = async (req, res) => {
             const API_KEY = process.env.TRIBUNAL_ELECTORAL_VOICEFLOW_API_KEY;
             const VERSION_ID = process.env.TRIBUNAL_ELECTORAL_VOICEFLOW_VERSION_ID;
 
+            // ### CORRECCIÓN 1: Volvemos a la URL original sin "/streaming" ###
             const url = `https://general-runtime.voiceflow.com/state/user/${userID}/interact`;
 
             const voiceflowResponse = await fetch(url, {
@@ -37,7 +38,8 @@ module.exports = async (req, res) => {
                     'Content-Type': 'application/json',
                     'Authorization': API_KEY,
                     'versionID': VERSION_ID,
-                    'Accept': 'text/event-stream'  // Restaurado para streaming SSE
+                    // ### CORRECCIÓN 2: Añadimos el header para pedir el STREAM ###
+                    'Accept': 'text/event-stream'
                 },
                 body: JSON.stringify({ action }),
             });
@@ -46,7 +48,7 @@ module.exports = async (req, res) => {
                 throw new Error(`Error en la respuesta de Voiceflow: ${voiceflowResponse.statusText}`);
             }
             
-            res.setHeader('Content-Type', 'text/event-stream');  // Corregido: SSE, no JSON
+            res.setHeader('Content-Type', 'application/json');
             voiceflowResponse.body.pipe(res);
 
         } else if (target === 'tts') {
