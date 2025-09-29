@@ -8,7 +8,28 @@ function fetchAndParsePage() {
   return axios.get(PAGE_URL)
     .then(response => {
       const $ = cheerio.load(response.data);
-      // Extrae texto plano, ignora scripts/styles/nav
+      
+      // NUEVO: Parsea tabla de índices vigentes (prioridad, como en tu prompt)
+      const blocks = [];
+      $('table tr').each((i, row) => {
+        const cols = $(row).find('td');
+        if (cols.length >= 3) {
+          const num = $(cols[0]).text().trim();
+          const rubro = $(cols[1]).text().trim();
+          const clave = $(cols[2]).text().trim();
+          if (rubro && clave && rubro.length > 20) {  // Filtra triviales
+            const full_text = `ÍNDICE: ${rubro} (Clave: ${clave})`;  // Verbatim como resumen; full si link a detalle
+            blocks.push({
+              clave,
+              rubro,
+              fecha: null,  // No visible en tabla; extrae si hay
+              full_text
+            });
+          }
+        }
+      });
+      
+      // Extrae texto plano para bloques full-text (viejo + mejorado)
       let text = $('body').text().replace(/\s+/g, ' ').trim();
       
       // Limpia ruido: remueve líneas cortas (simulando split \n, pero en texto plano)
@@ -16,12 +37,12 @@ function fetchAndParsePage() {
       text = lines.join('\n');
       
       // Split bloques: regex para delimitadores en FULL CAPS (e.g., RUBRO, CONSIDERANDO)
-      const blockPattern = /([A-Z\s]{3,50})\s+((?:.|\n)*?)(?=[A-Z\s]{3,50}|$)/g;  // Remueve \n+ estricto, usa \s+ para espacios      const blocks = [];
+      const blockPattern = /([A-Z\s]{3,50})\s+((?:.|\n)*?)(?=[A-Z\s]{3,50}|$)/g;  // Remueve \n+ estricto, usa \s+ para espacios
       let match;
       while ((match = blockPattern.exec(text)) !== null) {
         const title = match[1].trim();
         let content = match[2].trim();
-        if (content.length > 200) {
+        if (content.length > 200 && !blocks.some(b => b.rubro.includes(title))) {  // Evita duplicados
           // Extrae clave: patrón XX/XXXX
           const claveMatch = content.match(/(\d{2}\/\d{4})/);
           const clave = claveMatch ? claveMatch[1] : null;
@@ -31,7 +52,7 @@ function fetchAndParsePage() {
           const fecha = fechaMatch ? fechaMatch[1] : null;
           
           // Rubro: primera línea en caps post-título
-          const rubroMatch = content.match(/^([A-Z].*?)(?=\n[A-Z]|$)/m);
+          const rubroMatch = content.match(/^([A-Z].*?)(?=\n[A-Z]|$)/mi);
           const rubro = rubroMatch ? rubroMatch[1].trim() : title;
           
           blocks.push({
@@ -42,6 +63,8 @@ function fetchAndParsePage() {
           });
         }
       }
+      
+      console.log(`Parsed ${blocks.length} blocks from table/full-text`);  // Debug en logs Vercel
       return blocks;
     })
     .catch(error => {
@@ -135,5 +158,3 @@ module.exports = (req, res) => {
       res.status(500).json({ error: error.message });
     });
 };
-
-// Deploy GH
