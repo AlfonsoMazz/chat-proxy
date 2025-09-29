@@ -11,11 +11,10 @@ module.exports = async (req, res) => {
     }
     
     if (req.method !== 'POST') {
-         return res.status(405).json({ error: 'Method Not Allowed' });
+        return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
     try {
-        // AHORA ESPERAMOS UN "target" PARA DECIDIR QUÉ HACER
         const { target, ...payload } = req.body;
 
         if (!target) {
@@ -25,41 +24,45 @@ module.exports = async (req, res) => {
         // --- ROUTER: Decide a qué API llamar ---
 
         if (target === 'voiceflow') {
-            // --- Lógica de Voiceflow (la que ya tenías) ---
-            const { userID, action } = payload;
+            const { userID, action, stream } = payload; // Capturamos el parámetro "stream" del frontend
             if (!userID || !action) {
                 return res.status(400).json({ error: 'Faltan userID o action para Voiceflow.' });
             }
 
-            const API_KEY = process.env.TRIBUNAL_ELECTORAL_VOICEFLOW_API_KEY; // Usando tu variable
-            const VERSION_ID = process.env.TRIBUNAL_ELECTORAL_VOICEFLOW_VERSION_ID; // Usando tu variable
+            const API_KEY = process.env.TRIBUNAL_ELECTORAL_VOICEFLOW_API_KEY;
+            const VERSION_ID = process.env.TRIBUNAL_ELECTORAL_VOICEFLOW_VERSION_ID;
 
-            const voiceflowResponse = await fetch(
-                `https://general-runtime.voiceflow.com/state/user/${userID}/interact`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': API_KEY,
-                        'versionID': VERSION_ID,
-                    },
-                    body: JSON.stringify({ action }),
-                }
-            );
+            // Construimos la URL de Voiceflow, añadiendo el parámetro para streaming
+            const url = `https://general-runtime.voiceflow.com/state/user/${userID}/interact${stream ? '?stream=true' : ''}`;
+
+            const voiceflowResponse = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': API_KEY,
+                    'versionID': VERSION_ID,
+                },
+                body: JSON.stringify({ action }),
+            });
 
             if (!voiceflowResponse.ok) throw new Error('Error en la respuesta de Voiceflow');
-            const data = await voiceflowResponse.json();
-            return res.status(200).json(data);
+            
+            // ########## INICIO DE LA CORRECCIÓN ##########
+            // En lugar de esperar el JSON, ahora pasamos el stream directamente.
+            
+            res.setHeader('Content-Type', 'application/json'); // Indicamos que el stream contiene JSON
+            voiceflowResponse.body.pipe(res); // ¡Convertido en tubería!
+            
+            // ########## FIN DE LA CORRECCIÓN ##########
 
         } else if (target === 'tts') {
-            // --- NUEVA Lógica de ElevenLabs (Text-to-Speech) ---
             const { text } = payload;
             if (!text) {
                 return res.status(400).json({ error: 'Falta el "text" para TTS.' });
             }
 
-            const API_KEY = process.env.TRIBUNAL_ELECTORAL_TTS_API_KEY; // Usando tu variable
-            const VOICE_ID = process.env.TRIBUNAL_ELECTORAL_VOICE_ID; // Usando tu variable
+            const API_KEY = process.env.TRIBUNAL_ELECTORAL_TTS_API_KEY;
+            const VOICE_ID = process.env.TRIBUNAL_ELECTORAL_VOICE_ID;
             const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`;
 
             const ttsResponse = await fetch(ttsUrl, {
@@ -71,7 +74,7 @@ module.exports = async (req, res) => {
                 },
                 body: JSON.stringify({
                     text: text,
-                    model_id: 'eleven_multilingual_v2', // O el modelo que prefieras
+                    model_id: 'eleven_multilingual_v2',
                     voice_settings: {
                         stability: 0.5,
                         similarity_boost: 0.75,
@@ -81,9 +84,8 @@ module.exports = async (req, res) => {
 
             if (!ttsResponse.ok) throw new Error('Error en la respuesta de ElevenLabs');
             
-            // Devolvemos el audio directamente al frontend
             res.setHeader('Content-Type', 'audio/mpeg');
-            ttsResponse.body.pipe(res);
+            ttsResponse.body.pipe(res); // Tu tubería de audio (ya estaba correcta)
 
         } else {
             return res.status(400).json({ error: 'Target no válido.' });
