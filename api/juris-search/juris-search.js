@@ -16,13 +16,13 @@ function fetchAndParsePage() {
         headless: chrome.headless,
       });
       const page = await browser.newPage();
-      await page.goto(PAGE_URL, { waitUntil: 'networkidle0' });  // Espera JS load
-      const html = await page.content();  // HTML rendered
+      await page.goto(PAGE_URL, { waitUntil: 'networkidle0' });  // Espera JS load completo
+      const html = await page.content();  // HTML rendered con tabla
       await browser.close();
 
       const $ = cheerio.load(html);
       
-      // Parsea tabla de índices vigentes (verbatim de <tr><td>)
+      // Parsea tabla de índices vigentes verbatim (prioridad)
       const blocks = [];
       $('table tr').each((i, row) => {
         const cols = $(row).find('td');
@@ -30,19 +30,19 @@ function fetchAndParsePage() {
           const num = $(cols[0]).text().trim();
           const rubro = $(cols[1]).text().trim();
           const clave = $(cols[2]).text().trim();
-          if (rubro && clave && rubro.length > 20 && !blocks.some(b => b.clave === clave)) {  // Unicidad por clave
-            const full_text = rubro;  // Verbatim rubro como resumen; full si hay detalle
+          if (rubro && clave && rubro.length > 20 && clave.match(/\d+\/\d+/) && !blocks.some(b => b.clave === clave)) {  // Unicidad por clave exacta
+            const full_text = rubro;  // Verbatim rubro como resumen/full (índice)
             blocks.push({
               clave,
               rubro,
-              fecha: null,  // Extrae si hay columna fecha
+              fecha: null,  // Si hay columna fecha, agrega $(cols[3]).text()
               full_text
             });
           }
         }
       });
       
-      // Parsea bloques full-text abajo (si existen, verbatim)
+      // Parsea bloques full-text abajo si existen (verbatim, no duplicados)
       let text = $('body').text().replace(/\s+/g, ' ').trim();
       const lines = text.split('\n').filter(line => line.length > 10);
       text = lines.join('\n');
@@ -52,14 +52,14 @@ function fetchAndParsePage() {
         const title = match[1].trim();
         let content = match[2].trim();
         if (content.length > 200 && !blocks.some(b => b.rubro.includes(title))) {
-          const claveMatch = content.match(/(\d{2}\/\d{4})/);
+          const claveMatch = content.match(/(\d+\/\d+)/);  // Más loose para claves como 21/2018
           const clave = claveMatch ? claveMatch[1] : null;
-          const fechaMatch = content.match(/(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})/);
+          const fechaMatch = content.match(/(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})/i);
           const fecha = fechaMatch ? fechaMatch[1] : null;
           const rubroMatch = content.match(/^([A-Z].*?)(?=\n[A-Z]|$)/mi);
           const rubro = rubroMatch ? rubroMatch[1].trim() : title;
           
-          if (clave && !blocks.some(b => b.clave === clave)) {  // Unicidad
+          if (clave && !blocks.some(b => b.clave === clave)) {
             blocks.push({
               clave,
               rubro,
@@ -70,7 +70,7 @@ function fetchAndParsePage() {
         }
       }
       
-      console.log(`Parsed ${blocks.length} blocks from table/full-text`);  // Debug
+      console.log(`Parsed ${blocks.length} blocks from table/full-text`);  // Debug: Ve en Vercel logs
       resolve(blocks);
     } catch (error) {
       if (browser) await browser.close();
@@ -98,7 +98,7 @@ function generateVariations(userQuery) {
 function searchBlocks(blocks, variations, full) {
   const fuse = new Fuse(blocks, {
     keys: ['rubro', 'full_text'],
-    threshold: 0.4,  // Loose para sinónimos
+    threshold: 0.4,  // Loose para sinónimos como "género" vs "política de género"
     includeScore: true
   });
 
@@ -115,7 +115,7 @@ function searchBlocks(blocks, variations, full) {
           clave: block.clave,
           rubro: block.rubro,
           fecha: block.fecha,
-          resumen: block.rubro,  // Verbatim exacto
+          resumen: block.rubro,  // Verbatim exacto, no parafrasear
           completo: full ? block.full_text : ''
         };
         matches.push(match);
