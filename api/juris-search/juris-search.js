@@ -16,8 +16,7 @@ function fetchAndParsePage() {
       text = lines.join('\n');
       
       // Split bloques: regex para delimitadores en FULL CAPS (e.g., RUBRO, CONSIDERANDO)
-      const blockPattern = /([A-Z\s]{3,50})\n+((?:.|\n)*?)(?=[A-Z\s]{3,50}\n| $)/g;
-      const blocks = [];
+      const blockPattern = /([A-Z\s]{3,50})\s+((?:.|\n)*?)(?=[A-Z\s]{3,50}|$)/g;  // Remueve \n+ estricto, usa \s+ para espacios      const blocks = [];
       let match;
       while ((match = blockPattern.exec(text)) !== null) {
         const title = match[1].trim();
