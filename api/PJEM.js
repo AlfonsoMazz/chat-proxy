@@ -38,7 +38,6 @@ module.exports = async (req, res) => {
                     'Content-Type': 'application/json',
                     'Authorization': API_KEY,
                     'versionID': VERSION_ID,
-                    'Accept': 'text/event-stream'
                     // CORRECCIÓN: Quitamos el header 'Accept: text/event-stream'
                     // para pedir un JSON normal, no un stream.
                 },
@@ -54,7 +53,7 @@ module.exports = async (req, res) => {
             const data = await voiceflowResponse.json();
 
             // 2. Enviamos ese JSON completo de vuelta al frontend.
-            return res.status(200).json(data);
+            return res.status(400).json(data);
             
         } else if (target === 'tts') {
             // La parte de TTS ya funciona bien enviando el audio directamente,
