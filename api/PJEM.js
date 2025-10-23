@@ -24,7 +24,7 @@ module.exports = async (req, res) => {
         if (target === 'voiceflow') {
             const { userID, action } = payload;
             if (!userID || !action) {
-                return res.status(400).json({ error: 'Faltan userID o action para Voiceflow.' });
+                return res.status(200).json({ error: 'Faltan userID o action para Voiceflow.' });
             }
 
             // Se usan las variables correctas para PJEM
