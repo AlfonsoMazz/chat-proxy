@@ -38,9 +38,7 @@ module.exports = async (req, res) => {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': API_KEY,
-                    'versionID': VERSION_ID,
-                    // ### CORRECCIÓN: Añadimos el header para pedir el STREAM ###
-                    'Accept': 'text/event-stream'
+                    'versionID': VERSION_ID
                 },
                 body: JSON.stringify({ action }),
             });
@@ -49,10 +47,9 @@ module.exports = async (req, res) => {
                 throw new Error(`Error en la respuesta de Voiceflow: ${voiceflowResponse.statusText}`);
             }
             
-            // ### CORRECCIÓN: Manejamos la respuesta como un stream ###
-            // Exactamente igual que en tribunal_electoral.js
             res.setHeader('Content-Type', 'application/json');
-            voiceflowResponse.body.pipe(res);
+            const data = await voiceflowResponse.json();
+            res.json(data);
             
         } else if (target === 'tts') {
             // Esta parte ya funcionaba bien y se queda igual
