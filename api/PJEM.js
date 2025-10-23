@@ -24,10 +24,9 @@ module.exports = async (req, res) => {
         if (target === 'voiceflow') {
             const { userID, action } = payload;
             if (!userID || !action) {
-                return res.status(200).json({ error: 'Faltan userID o action para Voiceflow.' });
+                return res.status(400).json({ error: 'Faltan userID o action para Voiceflow.' });
             }
 
-            // Se usan las variables correctas para PJEM
             const API_KEY = process.env.PJEM_VOICEFLOW_API_KEY;
             const VERSION_ID = process.env.PJEM_VOICEFLOW_VERSION_ID;
 
@@ -39,10 +38,9 @@ module.exports = async (req, res) => {
                     'Content-Type': 'application/json',
                     'Authorization': API_KEY,
                     'versionID': VERSION_ID,
-                    // --- INICIO DE LA CORRECCIÓN ---
-                    // 1. Pedimos el STREAM, igual que en el bot que SÍ funciona.
                     'Accept': 'text/event-stream'
-                    // --- FIN DE LA CORRECCIÓN ---
+                    // CORRECCIÓN: Quitamos el header 'Accept: text/event-stream'
+                    // para pedir un JSON normal, no un stream.
                 },
                 body: JSON.stringify({ action }),
             });
@@ -51,20 +49,16 @@ module.exports = async (req, res) => {
                 throw new Error(`Error en la respuesta de Voiceflow: ${voiceflowResponse.statusText}`);
             }
             
-            // --- INICIO DE LA CORRECCIÓN ---
-            // 2. Pasamos el STREAM directamente al frontend,
-            //    en lugar de esperar y empaquetarlo como JSON.
-            res.setHeader('Content-Type', 'application/json'); // Voiceflow lo manda como JSON-stream
-            voiceflowResponse.body.pipe(res);
-            // --- FIN DE LA CORRECCIÓN ---
-            
-            /* ESTAS LÍNEAS SE ELIMINAN PORQUE ERAN EL PROBLEMA (BUFFERING)
+            // --- ¡ESTE ES EL CAMBIO CLAVE! ---
+            // 1. Leemos la respuesta completa de Voiceflow como JSON.
             const data = await voiceflowResponse.json();
+
+            // 2. Enviamos ese JSON completo de vuelta al frontend.
             return res.status(200).json(data);
-            */
             
         } else if (target === 'tts') {
-            // La parte de TTS está perfecta y no se toca.
+            // La parte de TTS ya funciona bien enviando el audio directamente,
+            // así que la dejamos como está.
             const { text } = payload;
             if (!text) return res.status(400).json({ error: 'Falta el "text" para TTS.' });
 
