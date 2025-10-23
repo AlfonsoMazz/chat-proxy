@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 
 module.exports = async (req, res) => {
-    // Las cabeceras CORS están bien
+    // Se mantiene el origen CORS específico de PJEM
     res.setHeader('Access-Control-Allow-Origin', 'https://demo.gobierno.datialabs.com'); 
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -27,6 +27,7 @@ module.exports = async (req, res) => {
                 return res.status(400).json({ error: 'Faltan userID o action para Voiceflow.' });
             }
 
+            // Se mantienen las variables de entorno de PJEM
             const API_KEY = process.env.PJEM_VOICEFLOW_API_KEY;
             const VERSION_ID = process.env.PJEM_VOICEFLOW_VERSION_ID;
 
@@ -38,8 +39,8 @@ module.exports = async (req, res) => {
                     'Content-Type': 'application/json',
                     'Authorization': API_KEY,
                     'versionID': VERSION_ID,
-                    // CORRECCIÓN: Quitamos el header 'Accept: text/event-stream'
-                    // para pedir un JSON normal, no un stream.
+                    // ### CORRECCIÓN: Añadimos el header para pedir el STREAM ###
+                    'Accept': 'text/event-stream'
                 },
                 body: JSON.stringify({ action }),
             });
@@ -48,19 +49,17 @@ module.exports = async (req, res) => {
                 throw new Error(`Error en la respuesta de Voiceflow: ${voiceflowResponse.statusText}`);
             }
             
-            // --- ¡ESTE ES EL CAMBIO CLAVE! ---
-            // 1. Leemos la respuesta completa de Voiceflow como JSON.
-            const data = await voiceflowResponse.json();
-
-            // 2. Enviamos ese JSON completo de vuelta al frontend.
-            return res.status(400).json(data);
+            // ### CORRECCIÓN: Manejamos la respuesta como un stream ###
+            // Exactamente igual que en tribunal_electoral.js
+            res.setHeader('Content-Type', 'application/json');
+            voiceflowResponse.body.pipe(res);
             
         } else if (target === 'tts') {
-            // La parte de TTS ya funciona bien enviando el audio directamente,
-            // así que la dejamos como está.
+            // Esta parte ya funcionaba bien y se queda igual
             const { text } = payload;
             if (!text) return res.status(400).json({ error: 'Falta el "text" para TTS.' });
 
+            // Se mantienen las variables de entorno de PJEM
             const API_KEY = process.env.PJEM_TTS_API_KEY;
             const VOICE_ID = process.env.PJEM_VOICE_ID;
             const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`;
