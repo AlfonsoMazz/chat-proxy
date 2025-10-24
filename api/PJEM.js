@@ -31,6 +31,7 @@ module.exports = async (req, res) => {
             const API_KEY = process.env.PJEM_VOICEFLOW_API_KEY;
             const VERSION_ID = process.env.PJEM_VOICEFLOW_VERSION_ID;
 
+            // ### CORRECCIÓN 1: Volvemos a la URL original sin "/streaming" ###
             const url = `https://general-runtime.voiceflow.com/state/user/${userID}/interact`;
 
             const voiceflowResponse = await fetch(url, {
@@ -39,7 +40,7 @@ module.exports = async (req, res) => {
                     'Content-Type': 'application/json',
                     'Authorization': API_KEY,
                     'versionID': VERSION_ID,
-                    // --- AJUSTE CLAVE 1: Pedir el stream ---
+                    // ### CORRECCIÓN 2: Añadimos el header para pedir el STREAM ###
                     'Accept': 'text/event-stream'
                 },
                 body: JSON.stringify({ action }),
@@ -50,17 +51,10 @@ module.exports = async (req, res) => {
             }
             
             res.setHeader('Content-Type', 'application/json');
-            
-            // --- AJUSTE CLAVE 2: Retransmitir el stream (pipe) ---
-            // Se elimina:
-            // const data = await voiceflowResponse.json();
-            // res.json(data);
-            
-            // Se añade:
             voiceflowResponse.body.pipe(res);
-            
+
         } else if (target === 'tts') {
-            // Esta parte ya funcionaba bien y se queda igual
+            // Tu código de TTS (sin cambios)
             const { text } = payload;
             if (!text) return res.status(400).json({ error: 'Falta el "text" para TTS.' });
 
