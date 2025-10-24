@@ -38,7 +38,9 @@ module.exports = async (req, res) => {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': API_KEY,
-                    'versionID': VERSION_ID
+                    'versionID': VERSION_ID,
+                    // --- AJUSTE CLAVE 1: Pedir el stream ---
+                    'Accept': 'text/event-stream'
                 },
                 body: JSON.stringify({ action }),
             });
@@ -48,8 +50,14 @@ module.exports = async (req, res) => {
             }
             
             res.setHeader('Content-Type', 'application/json');
-            const data = await voiceflowResponse.json();
-            res.json(data);
+            
+            // --- AJUSTE CLAVE 2: Retransmitir el stream (pipe) ---
+            // Se elimina:
+            // const data = await voiceflowResponse.json();
+            // res.json(data);
+            
+            // Se añade:
+            voiceflowResponse.body.pipe(res);
             
         } else if (target === 'tts') {
             // Esta parte ya funcionaba bien y se queda igual
