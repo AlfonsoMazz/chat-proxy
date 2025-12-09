@@ -3,7 +3,7 @@ const fetch = require('node-fetch');
 module.exports = async (req, res) => {
     // 1. CONFIGURACIÓN CORS ESPECÍFICA PARA LA ESCUELA JUDICIAL
     // Esto permite que SOLO tu nuevo subdominio pueda usar esta API
-    res.setHeader('Access-Control-Allow-Origin', 'https://demo.escuela.judicial.datialabs.com'); 
+    res.setHeader('Access-Control-Allow-Origin', 'https://demo.escuelajudicial.datialabs.com'); 
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
