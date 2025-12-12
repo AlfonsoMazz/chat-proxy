@@ -1,105 +1,102 @@
-const fetch = require('node-fetch');
+// api/EJEM.js - Versión Robusta (Sin dependencia externa de fetch)
 
 module.exports = async (req, res) => {
-    // --- 1. SEGURIDAD CORS ---
-    // Solo permitimos el dominio de la Escuela Judicial
-    res.setHeader('Access-Control-Allow-Origin', 'https://demo.escuelajudicial.datialabs.com'); 
+    // 1. CONFIGURACIÓN CORS (Permite acceso al frontend)
+    const allowedOrigins = [
+        'https://demo.escuelajudicial.datialabs.com',
+        'https://www.demo.escuelajudicial.datialabs.com'
+    ];
+    
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+        // Fallback seguro para desarrollo o si el header viene vacío
+        res.setHeader('Access-Control-Allow-Origin', 'https://demo.escuelajudicial.datialabs.com');
+    }
+    
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-    // Manejo de preflight request (OPTIONS)
+    // Responder OK a la petición OPTIONS (Pre-flight del navegador)
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
-    
-    // Solo aceptamos POST
+
     if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed' });
+        return res.status(405).json({ error: 'Método no permitido. Use POST.' });
     }
 
     try {
         const { target, ...payload } = req.body;
 
-        if (!target) {
-            return res.status(400).json({ error: 'Falta el "target" en la petición.' });
+        // 2. VALIDACIÓN DE VARIABLES DE ENTORNO
+        if (!process.env.EJEM_VOICEFLOW_API_KEY) {
+            console.error("ERROR CRÍTICO: Faltan variables de entorno EJEM_VOICEFLOW_API_KEY");
+            return res.status(500).json({ error: 'Configuración del servidor incompleta (Env Vars).' });
         }
 
-        // --- 2. LÓGICA VOICEFLOW ---
+        // 3. ENRUTAMIENTO (Voiceflow vs TTS)
         if (target === 'voiceflow') {
             const { userID, action } = payload;
-            if (!userID || !action) {
-                return res.status(400).json({ error: 'Faltan userID o action para Voiceflow.' });
-            }
-
-            // Usamos las variables de entorno específicas de EJEM
-            const API_KEY = process.env.EJEM_VOICEFLOW_API_KEY;
-            const VERSION_ID = process.env.EJEM_VOICEFLOW_VERSION_ID;
-
-            // URL estándar de Runtime de Voiceflow
-            const url = `https://general-runtime.voiceflow.com/state/user/${userID}/interact`;
-
-            const voiceflowResponse = await fetch(url, {
+            
+            // Usamos el fetch global (Node 18+)
+            const response = await fetch(`https://general-runtime.voiceflow.com/state/user/${userID}/interact`, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': API_KEY,
-                    'versionID': VERSION_ID,
-                    'Accept': 'text/event-stream' // Importante para streaming si se usa
+                    'Authorization': process.env.EJEM_VOICEFLOW_API_KEY,
+                    'versionID': process.env.EJEM_VOICEFLOW_VERSION_ID,
+                    'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ action }),
+                body: JSON.stringify({ action })
             });
 
-            if (!voiceflowResponse.ok) {
-                // Leemos el error para debugging (opcional, o lanzamos error genérico)
-                const errorText = await voiceflowResponse.text();
-                console.error(`Voiceflow Error (${voiceflowResponse.status}):`, errorText);
-                throw new Error(`Error en la respuesta de Voiceflow: ${voiceflowResponse.statusText}`);
+            if (!response.ok) {
+                const errorDetail = await response.text();
+                console.error(`Error Voiceflow (${response.status}):`, errorDetail);
+                return res.status(response.status).json({ error: 'Error externo Voiceflow', details: errorDetail });
             }
-            
-            // Pipeamos la respuesta directamente al frontend
-            res.setHeader('Content-Type', 'application/json');
-            voiceflowResponse.body.pipe(res);
 
-        // --- 3. LÓGICA TTS (ELEVENLABS) ---
+            const data = await response.json();
+            return res.json(data);
+
         } else if (target === 'tts') {
-            const { text } = payload;
-            if (!text) return res.status(400).json({ error: 'Falta el "text" para TTS.' });
-
-            // Usamos las variables de entorno específicas de EJEM
-            const API_KEY = process.env.EJEM_TTS_API_KEY;
-            const VOICE_ID = process.env.EJEM_VOICE_ID;
-            
-            const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`;
-
-            const ttsResponse = await fetch(ttsUrl, {
+            const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${process.env.EJEM_VOICE_ID}`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'audio/mpeg',
                     'Content-Type': 'application/json',
-                    'xi-api-key': API_KEY,
+                    'xi-api-key': process.env.EJEM_TTS_API_KEY,
                 },
                 body: JSON.stringify({
-                    text: text,
+                    text: payload.text,
                     model_id: 'eleven_multilingual_v2',
                     voice_settings: { stability: 0.5, similarity_boost: 0.75 },
                 }),
             });
 
             if (!ttsResponse.ok) {
-                const errorText = await ttsResponse.text();
-                console.error(`ElevenLabs Error (${ttsResponse.status}):`, errorText);
-                throw new Error('Error en la respuesta de ElevenLabs');
+                const err = await ttsResponse.text();
+                console.error('Error TTS:', err);
+                throw new Error('Fallo en ElevenLabs');
             }
             
+            // Convertir el stream a buffer para enviarlo
+            const arrayBuffer = await ttsResponse.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            
             res.setHeader('Content-Type', 'audio/mpeg');
-            ttsResponse.body.pipe(res);
+            res.send(buffer);
 
         } else {
-            return res.status(400).json({ error: 'Target no válido.' });
+            return res.status(400).json({ error: 'Target no válido (debe ser voiceflow o tts)' });
         }
 
     } catch (error) {
-        console.error('Error en el servidor proxy (EJEM):', error.message);
-        return res.status(500).json({ error: 'Error interno del servidor proxy.' });
+        console.error('SERVER ERROR (EJEM.js):', error);
+        return res.status(500).json({ 
+            error: 'Error interno del Proxy', 
+            message: error.message 
+        });
     }
 };
