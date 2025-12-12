@@ -1,95 +1,65 @@
-// ./api/EJEM.js
+// api/EJEM.js  ← este será el nuevo endpoint: /api/EJEM
 
-/**
- * Backend Proxy para Escuela Judicial del Estado de México (EJEM)
- * Maneja la comunicación segura entre el Frontend, Voiceflow y ElevenLabs.
- */
+const fetch = require('node-fetch');
 
 module.exports = async (req, res) => {
-    
-    // --- 1. CONFIGURACIÓN DE SEGURIDAD (CORS) ---
-    // Solo permitimos peticiones desde el subdominio oficial
+    // CORS específico para el nuevo subdominio
     res.setHeader('Access-Control-Allow-Origin', 'https://demo.escuelajudicial.datialabs.com');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    // Manejo de Preflight request (navegadores)
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
     
-    // Validación de Método
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
     try {
-        // Extracción segura del payload
-        const body = req.body || {};
-        const { target, ...payload } = body;
+        const { target, ...payload } = req.body;
 
         if (!target) {
-            return res.status(400).json({ error: 'Falta el parámetro "target".' });
+            return res.status(400).json({ error: 'Falta el "target" en la petición.' });
         }
 
-        // --- 2. RUTAS DE SERVICIO ---
-
-        // A) INTERACCIÓN CON VOICEFLOW
         if (target === 'voiceflow') {
             const { userID, action } = payload;
-            
-            // Validación de integridad
             if (!userID || !action) {
-                return res.status(400).json({ error: 'Faltan datos requeridos (userID o action).' });
+                return res.status(400).json({ error: 'Faltan userID o action para Voiceflow.' });
             }
 
-            // Credenciales de entorno (EJEM)
+            // ← AQUÍ VAN TUS NUEVAS VARIABLES DE ENTORNO (créelas en Vercel)
             const API_KEY = process.env.EJEM_VOICEFLOW_API_KEY;
             const VERSION_ID = process.env.EJEM_VOICEFLOW_VERSION_ID;
-            
-            if (!API_KEY || !VERSION_ID) {
-                console.error('[EJEM] Error Crítico: Faltan variables de entorno de Voiceflow.');
-                return res.status(500).json({ error: 'Error de configuración del servidor.' });
-            }
 
-            // Petición a Voiceflow
-            const vfUrl = `https://general-runtime.voiceflow.com/state/user/${userID}/interact`;
-            
-            const vfResponse = await fetch(vfUrl, {
+            const url = `https://general-runtime.voiceflow.com/state/user/${userID}/interact`;
+
+            const voiceflowResponse = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': API_KEY,
                     'versionID': VERSION_ID,
-                    'Accept': 'application/json' // Solicitamos JSON explícito para procesarlo
+                    'Accept': 'text/event-stream'
                 },
                 body: JSON.stringify({ action }),
             });
 
-            if (!vfResponse.ok) {
-                const errorText = await vfResponse.text();
-                console.error(`[EJEM] Voiceflow API Error: ${vfResponse.status} - ${errorText}`);
-                throw new Error(`Voiceflow respondió con estado: ${vfResponse.status}`);
+            if (!voiceflowResponse.ok) {
+                throw new Error(`Error en Voiceflow: ${voiceflowResponse.statusText}`);
             }
             
-            // Retornamos la respuesta procesada al frontend
-            const data = await vfResponse.json();
-            return res.status(200).json(data);
+            res.setHeader('Content-Type', 'application/json');
+            voiceflowResponse.body.pipe(res);
 
-        // B) TEXT-TO-SPEECH (ELEVENLABS)
         } else if (target === 'tts') {
             const { text } = payload;
-            
-            if (!text) return res.status(400).json({ error: 'Falta el texto para TTS.' });
+            if (!text) return res.status(400).json({ error: 'Falta el "text" para TTS.' });
 
-            // Credenciales de entorno (EJEM)
-            const API_KEY = process.env.EJEM_TTS_API_KEY;
-            const VOICE_ID = process.env.EJEM_VOICE_ID;
-            
-             if (!API_KEY || !VOICE_ID) {
-                console.error('[EJEM] Error Crítico: Faltan variables de entorno de TTS.');
-                return res.status(500).json({ error: 'Error de configuración del servidor (TTS).' });
-            }
+            // Usa la misma clave de ElevenLabs o crea una nueva si lo prefieres
+            const API_KEY = process.env.EJEM_TTS_API_KEY || process.env.PJEM_TTS_API_KEY;
+            const VOICE_ID = process.env.EJEM_VOICE_ID || process.env.PJEM_VOICE_ID;
 
             const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`;
 
@@ -107,26 +77,17 @@ module.exports = async (req, res) => {
                 }),
             });
 
-            if (!ttsResponse.ok) {
-                const err = await ttsResponse.text();
-                console.error(`[EJEM] TTS API Error: ${err}`);
-                throw new Error('Falló la generación de audio en ElevenLabs.');
-            }
+            if (!ttsResponse.ok) throw new Error('Error en ElevenLabs');
             
-            // Procesamiento de audio binario
-            const audioBuffer = await ttsResponse.arrayBuffer();
             res.setHeader('Content-Type', 'audio/mpeg');
-            res.setHeader('Content-Length', audioBuffer.byteLength);
-            
-            // Enviamos el buffer directamente
-            return res.send(Buffer.from(audioBuffer));
+            ttsResponse.body.pipe(res);
 
         } else {
-            return res.status(400).json({ error: 'Target desconocido.' });
+            return res.status(400).json({ error: 'Target no válido.' });
         }
 
     } catch (error) {
-        console.error('[EJEM] Excepción no controlada:', error.message);
-        return res.status(500).json({ error: 'Error interno en el Proxy EJEM.' });
+        console.error('Error en proxy EJEM:', error.message);
+        return res.status(500).json({ error: 'Error interno del servidor proxy.' });
     }
 };
