@@ -1,93 +1,83 @@
-const fetch = require('node-fetch');
+// api/EJEM.js - Modo "Tubo Transparente" (Streaming)
 
 module.exports = async (req, res) => {
-    // Se mantiene el origen CORS específico de EJEM
-    res.setHeader('Access-Control-Allow-Origin', 'https://demo.escuelajudicial.datialabs.com'); 
+    // --- 1. CONFIGURACIÓN CORS ---
+    const allowedOrigins = [
+        'https://demo.escuelajudicial.datialabs.com',
+        'https://www.demo.escuelajudicial.datialabs.com'
+    ];
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+        res.setHeader('Access-Control-Allow-Origin', 'https://demo.escuelajudicial.datialabs.com');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-    
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed' });
-    }
+    if (req.method === 'OPTIONS') return res.status(200).end();
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
         const { target, ...payload } = req.body;
 
-        if (!target) {
-            return res.status(400).json({ error: 'Falta el "target" en la petición.' });
-        }
-
+        // --- 2. ENRUTAMIENTO VOICEFLOW ---
         if (target === 'voiceflow') {
             const { userID, action } = payload;
-            if (!userID || !action) {
-                return res.status(400).json({ error: 'Faltan userID o action para Voiceflow.' });
-            }
-
-            // Se mantienen las variables de entorno de EJEM
-            const API_KEY = process.env.EJEM_VOICEFLOW_API_KEY;
-            const VERSION_ID = process.env.EJEM_VOICEFLOW_VERSION_ID;
-
-            // ### CORRECCIÓN 1: Volvemos a la URL original sin "/streaming" ###
-            const url = `https://general-runtime.voiceflow.com/state/user/${userID}/interact`;
-
-            const voiceflowResponse = await fetch(url, {
+            
+            // Hacemos la petición pero NO usamos 'await response.json()'
+            const response = await fetch(`https://general-runtime.voiceflow.com/state/user/${userID}/interact`, {
                 method: 'POST',
                 headers: {
+                    'Authorization': process.env.EJEM_VOICEFLOW_API_KEY,
+                    'versionID': process.env.EJEM_VOICEFLOW_VERSION_ID,
                     'Content-Type': 'application/json',
-                    'Authorization': API_KEY,
-                    'versionID': VERSION_ID,
-                    // ### CORRECCIÓN 2: Añadimos el header para pedir el STREAM ###
-                    'Accept': 'text/event-stream'
+                    'Accept': 'application/json' 
                 },
-                body: JSON.stringify({ action }),
+                body: JSON.stringify({ action })
             });
 
-            if (!voiceflowResponse.ok) {
-                throw new Error(`Error en la respuesta de Voiceflow: ${voiceflowResponse.statusText}`);
+            // Si Voiceflow da error, pasamos el estado y el texto tal cual
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`Voiceflow Error (${response.status}):`, errorText);
+                return res.status(response.status).send(errorText);
             }
-            
+
+            // TRUCO MAESTRO: Convertimos la respuesta en Buffer y la enviamos.
+            // Esto evita problemas de parsing si la respuesta es compleja.
+            const dataBuffer = await response.arrayBuffer();
             res.setHeader('Content-Type', 'application/json');
-            voiceflowResponse.body.pipe(res);
+            res.send(Buffer.from(dataBuffer));
 
+        // --- 3. ENRUTAMIENTO TTS ---
         } else if (target === 'tts') {
-            // Tu código de TTS (sin cambios)
-            const { text } = payload;
-            if (!text) return res.status(400).json({ error: 'Falta el "text" para TTS.' });
-
-            // Se mantienen las variables de entorno de EJEM
-            const API_KEY = process.env.EJEM_TTS_API_KEY;
-            const VOICE_ID = process.env.EJEM_VOICE_ID;
-            const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`;
-
-            const ttsResponse = await fetch(ttsUrl, {
+            const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${process.env.EJEM_VOICE_ID}`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'audio/mpeg',
                     'Content-Type': 'application/json',
-                    'xi-api-key': API_KEY,
+                    'xi-api-key': process.env.EJEM_TTS_API_KEY,
                 },
                 body: JSON.stringify({
-                    text: text,
+                    text: payload.text,
                     model_id: 'eleven_multilingual_v2',
                     voice_settings: { stability: 0.5, similarity_boost: 0.75 },
                 }),
             });
 
-            if (!ttsResponse.ok) throw new Error('Error en la respuesta de ElevenLabs');
+            if (!ttsResponse.ok) throw new Error('Error ElevenLabs');
             
+            const audioBuffer = await ttsResponse.arrayBuffer();
             res.setHeader('Content-Type', 'audio/mpeg');
-            ttsResponse.body.pipe(res);
+            res.send(Buffer.from(audioBuffer));
 
         } else {
-            return res.status(400).json({ error: 'Target no válido.' });
+            return res.status(400).json({ error: 'Target no válido' });
         }
 
     } catch (error) {
-        console.error('Error en el servidor proxy:', error.message);
-        return res.status(500).json({ error: 'Error interno del servidor proxy.' });
+        console.error('CRITICAL PROXY ERROR:', error);
+        return res.status(500).json({ error: error.message });
     }
 };
