@@ -1,17 +1,15 @@
-const axios = require('axios');
-
 module.exports = async (req, res) => {
-    // 1. Configuración de CORS (Permitir solo tu dominio)
+    // 1. CORS: Configuración permisiva para asegurar que no sea el problema inicial
+    // Puedes restringirlo de nuevo a tu dominio específico una vez funcione.
     res.setHeader('Access-Control-Allow-Origin', 'https://demo.escuelajudicial.datialabs.com');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    // Manejo de preflight request (OPTIONS)
+    // Manejo de preflight (el navegador pregunta antes de enviar)
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
     
-    // Rechazar todo lo que no sea POST
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
@@ -19,91 +17,75 @@ module.exports = async (req, res) => {
     try {
         const { target, ...payload } = req.body;
 
-        if (!target) {
-            return res.status(400).json({ error: 'Falta el target' });
-        }
+        if (!target) return res.status(400).json({ error: 'Falta target' });
 
-        // --- BLOQUE 1: VOICEFLOW ENGINE ---
+        // Definimos las variables aquí (usando process.env para producción)
+        const VF_API_KEY = process.env.EJEM_VOICEFLOW_API_KEY;
+        const VF_VERSION_ID = process.env.EJEM_VOICEFLOW_VERSION_ID;
+        const EL_API_KEY = process.env.EJEM_TTS_API_KEY;
+        const EL_VOICE_ID = process.env.EJEM_VOICE_ID;
+
+        let upstreamResponse;
+
+        // --- LÓGICA VOICEFLOW ---
         if (target === 'voiceflow') {
             const { userID, action } = payload;
-            
-            // Variables de entorno
-            const API_KEY = process.env.EJEM_VOICEFLOW_API_KEY;
-            const VERSION_ID = process.env.EJEM_VOICEFLOW_VERSION_ID;
-
-            if (!userID || !action) {
-                return res.status(400).json({ error: 'Faltan datos para Voiceflow' });
-            }
-
             const url = `https://general-runtime.voiceflow.com/state/user/${userID}/interact`;
 
-            // Usamos AXIOS para una conexión robusta en Node 22
-            const response = await axios({
-                method: 'post',
-                url: url,
+            // Usamos el fetch NATIVO de Node 22 (sin requires)
+            upstreamResponse = await fetch(url, {
+                method: 'POST',
                 headers: {
-                    'Authorization': API_KEY,
-                    'versionID': VERSION_ID,
+                    'Authorization': VF_API_KEY,
+                    'versionID': VF_VERSION_ID,
                     'Content-Type': 'application/json',
-                    'Accept': 'text/event-stream' // Pedimos el stream
+                    'Accept': 'text/event-stream' // Clave para el streaming
                 },
-                data: { action },
-                responseType: 'stream' // <--- CLAVE: Esto mantiene el canal abierto sin llenar la memoria
+                body: JSON.stringify({ action })
             });
 
-            // Preparamos la respuesta para tu frontend
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-
-            // Conectamos la tubería (Pipe) de forma segura con Axios
-            response.data.pipe(res);
-
-        // --- BLOQUE 2: TTS ENGINE (ELEVENLABS) ---
+        // --- LÓGICA TTS (ElevenLabs) ---
         } else if (target === 'tts') {
             const { text } = payload;
-            
-            const API_KEY = process.env.EJEM_TTS_API_KEY;
-            const VOICE_ID = process.env.EJEM_VOICE_ID;
+            const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${EL_VOICE_ID}`;
 
-            if (!text) return res.status(400).json({ error: 'Falta texto para TTS' });
-
-            const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`;
-
-            const response = await axios({
-                method: 'post',
-                url: ttsUrl,
+            upstreamResponse = await fetch(ttsUrl, {
+                method: 'POST',
                 headers: {
-                    'xi-api-key': API_KEY,
+                    'xi-api-key': EL_API_KEY,
                     'Content-Type': 'application/json',
                     'Accept': 'audio/mpeg'
                 },
-                data: {
+                body: JSON.stringify({
                     text: text,
                     model_id: 'eleven_multilingual_v2',
-                    voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-                },
-                responseType: 'stream' // Stream de audio
+                    voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+                })
             });
-
-            res.setHeader('Content-Type', 'audio/mpeg');
-            response.data.pipe(res);
-
         } else {
-            return res.status(400).json({ error: 'Target no válido' });
+            return res.status(400).json({ error: 'Target inválido' });
         }
+
+        // --- MANEJO DE RESPUESTA Y STREAMING (Nativo Node 22) ---
+        
+        if (!upstreamResponse.ok) {
+            const errorText = await upstreamResponse.text();
+            console.error(`Error del proveedor (${target}):`, errorText);
+            return res.status(upstreamResponse.status).json({ error: errorText });
+        }
+
+        // Copiamos el tipo de contenido (importante para que el navegador sepa si es texto o audio)
+        res.setHeader('Content-Type', upstreamResponse.headers.get('content-type'));
+        
+        // La parte mágica: Bucle de lectura para Node 22
+        // Esto reemplaza al .pipe() y funciona sin librerías
+        for await (const chunk of upstreamResponse.body) {
+            res.write(chunk);
+        }
+        res.end();
 
     } catch (error) {
-        // Manejo de errores detallado en los Logs de Vercel
-        const errorMsg = error.response?.data 
-            ? JSON.stringify(error.response.data) 
-            : error.message;
-            
-        console.error('❌ Error en Proxy:', errorMsg);
-        
-        // Respondemos al frontend con un error 500 limpio
-        if (!res.headersSent) {
-            res.status(500).json({ error: 'Error de conexión con el proveedor IA' });
-        }
+        console.error('Error Crítico en Proxy:', error);
+        return res.status(500).json({ error: error.message });
     }
 };
