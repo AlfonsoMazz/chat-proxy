@@ -5,7 +5,7 @@ module.exports = async (req, res) => {
     // 1. CORS
     const allowedOrigins = [
         'https://demo.plataformainvestigacion.datialabs.com',
-        'http://localhost:5173' 
+        'http://localhost:5174' 
     ];
     
     const origin = req.headers.origin;
