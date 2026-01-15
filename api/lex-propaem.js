@@ -3,7 +3,7 @@
 module.exports = async (req, res) => {
     // 1. CORS - LISTA BLANCA DE DOMINIOS
     const allowedOrigins = [
-        'https://tu-subdominio-propaem.datialabs.com', // <--- ACTUALIZA CON TU DOMINIO REAL
+        'https://demo.propaem.datialabs.com', // <--- ACTUALIZA CON TU DOMINIO REAL
         'http://localhost:5173',
         'http://localhost:5174'
     ];
